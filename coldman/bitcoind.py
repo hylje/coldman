@@ -1,10 +1,10 @@
 """Bitcoind RPC"""
 
-import jsonrpc
+from bitcoinrpc import authproxy
 
 class BitcoindConnection(object):
     def __init__(self, connection_string, main_account):
-        self._bitcoind = jsonrpc.ServiceProxy(connection_string)
+        self._bitcoind = authproxy.AuthServiceProxy(connection_string)
         self._main_account = main_account
 
     def sendtoaddress(self, address, amount):
@@ -12,3 +12,4 @@ class BitcoindConnection(object):
 
     def addmultisigaddress(self, n, ms):
         return self._bitcoind.addmultisigaddress(n, ms)
+
