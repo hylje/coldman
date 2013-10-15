@@ -53,14 +53,27 @@ def require(f):
 def init(db_name):
     """Creates a new datafile."""
 
-    global db
-
-    db = sqlite3.connect(db_name)
 
     print "The app saves the hot wallet RPC address in the data file."
     print "It is used to initiate transfers to cold wallet addresses, "
     print "please be aware of its security."
-    btcd_conn = raw_input("Please enter the hot wallet RPC address: ")
+    btcd_conn = raw_input("Hot wallet RPC address: ")
+
+    print "Please specify the minimum number of signatures needed to "
+    print "withdraw from this cold wallet. E.g. 2"
+    try:
+        n = int(raw_input("Minimum signatures: "))
+    except ValueError:
+        print "It was not a valid integer number. Exiting."
+        sys.exit(6)
+
+    if n <= 1:
+        print "Minimum number of signatures must be at least 1. Exiting."
+        sys.exit(7)
+
+    global db
+
+    db = sqlite3.connect(db_name)
 
     cursor = db.cursor()
 
@@ -84,6 +97,12 @@ INSERT INTO coldman_settings (key, value) VALUES
 INSERT INTO coldman_settings (key, value) VALUES
 ('btcd_conn', ?)
 """, (btcd_conn,))
+    
+    cursor.execute("""
+INSERT INTO coldman_settings (key, value) VALUES
+('keys_minimum', ?)
+""", (n,))
+
     
     cursor.execute("""
 CREATE TABLE coldman_pubkeys (

@@ -1,8 +1,10 @@
 """Initial implementation of a multisig cold wallet generator."""
 
 import sys
+from binascii import hexlify
 
 import pycoin.wallet
+from pycoin.encoding import public_pair_to_sec
 
 from coldman import conf
 
@@ -45,6 +47,12 @@ def addpub(key, *remarks):
             remark))
     conf.db.commit()
 
+    n = get_n()
+    m = len(_get_wallets())
+
+    if n > m:
+        print "Note: %s more public keys must be added before freeze is available for use." % n-m
+
 def genkey():
     """Generates a new deterministic private key using pycoin."""
     print "Please enter a seed that will act as the master secret."
@@ -85,19 +93,43 @@ def freeze(amount):
     into the bitcoin network.
     """
     ms = _get_wallets()
+    n = get_n()
+    m = len(ms)
 
-    if len(ms) > 1:
-        n = len(ms)/2 + 1
+    if n > m:
+        print "Need to add %s more public keys before freeze is available for use. Exiting." % n-m
+        sys.exit(7)
+
+    if m > 1:
         addr = _make_multisig_addr(ms, n)
-    elif len(ms) == 1:
+    elif m == 1:
         addr = _make_normal_addr(ms[0])
     else:
         print "Datafile has no public keys."
         sys.exit(5)
+
+    txid = conf.bitcoind.sendtoaddress(addr, amount)
     
-    print "Would send %s to %s." % (amount, addr)
-    #conf.bitcoind.sendtoaddress(addr, amount)
-    
+    print "Transaction ID:", txid
+
+@conf.require
+def thaw_init(addr, amount):
+    """Creates a transaction stub that once signed by at least `n`
+    keys allows withdrawing money from a frozen multi-sig stash.
+
+    Get the addr from report.
+    """
+
+@conf.require
+def thaw_sign():
+    """Adds the given private key's signature to the thaw transaction.
+    """
+
+@conf.require
+def thaw_send():
+    """Sends a signed thaw transaction to the Bitcoin network.
+    """
+
 @conf.require
 def report():
     """Finds all addresses by all known permutations of `ms` and gets
@@ -105,7 +137,7 @@ def report():
     """    
     irange = xrange(0, get_i())
     addrs = _report_addresses(irange)
-    balances = binfo.multiaddr(active=addrs)
+    balances = conf.binfo.multiaddr(active=addrs)
     
     print "Total %s addresses:" % len(balances["addresses"])
     for addr in balances["addresses"]:
@@ -120,11 +152,12 @@ actions = {"freeze": freeze,
 @conf.require
 def _report_addresses(irange):
     ms = _get_wallets()
-    n = len(ms)/2 + 1
+    n = get_n()
 
     for i in irange:
         try:
-            ms_i = [m.subkey(i).wallet_key(as_private=False) for m in ms]
+            ms_i = [hexlify(public_pair_to_sec(m.subkey(i).public_pair)) 
+                    for m in ms]
         except pycoin.wallet.InvalidKeyGeneratedError:
             continue
         addr = conf.bitcoind.addmultisigaddress(n, ms_i)
@@ -134,10 +167,16 @@ def _report_addresses(irange):
 def _make_multisig_addr(ms, n):
 
     i = get_i()
+    i += 1
     ms_i = []
     while not ms_i:
         try:
-            ms_i = [m.subkey(i).wallet_key(as_private=False) for m in ms]
+            # TODO bitcoind uses a different public key format than
+            # specified in the deterministic key spec.
+            # Looks like bitcoind uses hex encoded openssl CECKeys as is
+            # -> DER
+            ms_i = [hexlify(public_pair_to_sec(m.subkey(i).public_pair))
+                    for m in ms]
         except pycoin.wallet.InvalidKeyGeneratedError:
             i += 1
             
@@ -169,7 +208,15 @@ def get_i():
 @conf.require
 def save_i(i):
     cursor = conf.db.cursor()
-    cursor.execute("UPDATE coldman_settings SET value=%s WHERE key='index'", (unicode(i),))
+    cursor.execute("UPDATE coldman_settings SET value=? WHERE key='index'", (unicode(i),))
+    conf.db.commit()
+
+@conf.require
+def get_n():
+    cursor = conf.db.cursor()
+    cursor.execute("SELECT value FROM coldman_settings WHERE key='keys_minimum'")
+    n, = cursor.fetchone()
+    return int(n)
 
 if __name__ == "__main__":
     main(sys.argv)

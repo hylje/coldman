@@ -6,8 +6,8 @@ class BinfoConnection(object):
     def __init__(self, connection_string):
         self._url = connection_string
     
-    def multiaddr(self, addresses):
+    def multiaddr(self, active):
         return (requests
                 .get(self._url + "multiaddr", 
-                     params={"active": "|".join(addresses)})
+                     params={"active": "|".join(active)})
                 .json())
