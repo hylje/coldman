@@ -1,10 +1,13 @@
 """Blockchain.info API wrapper"""
 
-from bitcoinrpc import authproxy
+import requests
 
-class Binfo(object):
+class BinfoConnection(object):
     def __init__(self, connection_string):
-        self._binfo = authproxy.AuthServiceProxy(connection_string)
+        self._url = connection_string
     
     def multiaddr(self, addresses):
-        return self._binfo.multiaddr(active="|".join(addresses))
+        return (requests
+                .get(self._url + "multiaddr", 
+                     params={"active": "|".join(addresses)})
+                .json())
