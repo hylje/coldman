@@ -92,7 +92,7 @@ key text,
 remark text)
 """)
     
-    cursor.commit()
+    db.commit()
 
     db.close()
 
