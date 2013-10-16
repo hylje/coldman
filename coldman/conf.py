@@ -118,7 +118,8 @@ i integer,
 address text,
 txid text,
 date_created text,
-amount real)
+amount real,
+spent integer)
 """)
     
     db.commit()

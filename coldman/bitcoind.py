@@ -21,6 +21,14 @@ class BitcoindConnection(object):
     def __init__(self, connection_string):
         self._bitcoind = authproxy.AuthServiceProxy(connection_string)
 
+    def _call(self, op, *args):
+        try:
+            return getattr(self._bitcoind, op)(*args)
+        except authproxy.JSONRPCException:
+            self._wrap_jsonrpc_exception()
+        except ValueError:
+            self._wrap_auth_exception()
+
     def _wrap_jsonrpc_exception(self):
         """Extracts the bitcoind error message from the jsonrpc local scope
 
@@ -86,6 +94,13 @@ class BitcoindConnection(object):
             self._wrap_jsonrpc_exception()
         except ValueError:
             self._wrap_auth_exception()
+
+    def getnewaddress(self):
+        return self._call("getnewaddress")
+
+    def createrawtransaction(self, inputs, outputs):
+        # TODO do some validation
+        return self._call("createrawtransaction", inputs, outputs)
         
     def _is_valid_pubkey(self, k):
         try:
@@ -94,7 +109,7 @@ class BitcoindConnection(object):
         except EncodingError:
             return False
 
-    def addmultisigaddress(self, n, ms):
+    def createmultisig(self, n, ms):
         try:
             int(n)
         except ValueError:
@@ -112,7 +127,7 @@ class BitcoindConnection(object):
             raise InvalidParameter(u"n (%s) cannot be less than the number of ms (%s)" % (n, len(ms)))
 
         try:
-            return self._bitcoind.addmultisigaddress(int(n), list(ms))
+            return self._bitcoind.createmultisig(int(n), list(ms))
         except authproxy.JSONRPCException:
             self._wrap_jsonrpc_exception()
         except ValueError:
