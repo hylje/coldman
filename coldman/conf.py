@@ -110,6 +110,16 @@ id integer primary key,
 key text,
 remark text)
 """)
+
+    cursor.execute("""
+CREATE TABLE coldman_txlog (
+id integer primary key,
+i integer,
+address text,
+txid text,
+date_created text,
+amount real)
+""")
     
     db.commit()
 

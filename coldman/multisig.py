@@ -110,41 +110,108 @@ def freeze(amount):
 
     txid = conf.bitcoind.sendtoaddress(addr, amount)
     
+    cursor = conf.db.cursor()
+    cursor.execute("""
+INSERT INTO coldman_txlog (i, address, txid, date_created, amount)
+VALUES (?, ?, ?, datetime(), ?)
+""", (get_i(), addr, txid, amount))
+    conf.db.commit()
+
     print "Transaction ID:", txid
 
 @conf.require
-def thaw_init(addr, amount):
+def thaw_init(i, amount):
     """Creates a transaction stub that once signed by at least `n`
     keys allows withdrawing money from a frozen multi-sig stash.
 
-    Get the addr from report.
+    Get the i by looking up the addr from either report_log (if
+    there's a log) or report_scan (if the log is stale).
+
+    Basically wraps bitcoind.createrawtransaction, and bundles it with
+    the i
     """
+
+    addr = _make_multisig_addr(_get_wallets(), get_n(), i=i)
+
+    # option 1: we have the transaction logged
+    cursor = conf.db.cursor()
+    row_count = cursor.execute("""
+SELECT txid FROM coldman_txlog WHERE i=?
+""", (i,))
+    if row_count:
+        txid, = cursor.fetchone()
+    else:
+        # option 2: look it up from b.info
+        # TODO binfo.unspent_outputs should be implemented
+        unspent = conf.binfo.unspent_outputs(address=addr)
+        # XXX normalize amounts here, b.info returns a fixed point
+        # integer
+        txs = [t for t in unspent["unspent_outputs"] if t["value"] > amount]
+        txs.sort(key=lambda item: item["value"])
+        if txs:
+            txid = txs[0]["tx_hash"]
+        else:
+            print "Could not find spendable transactions for that i."
+            sys.exit(8)
+
+    txn = conf.bitcoind.createrawtransaction(
+        [{
+                "txid": txid,
+                "vout": 0,
+                "scriptPubkey": None, # TODO
+                "redeemScript": None  # TODO
+                }],
+        [{addr: amount}])
+
+    
+    # https://gist.github.com/gavinandresen/3966071
 
 @conf.require
 def thaw_sign():
     """Adds the given private key's signature to the thaw transaction.
+    
+    Basically wraps bitcoind.signrawtransaction
     """
 
 @conf.require
 def thaw_send():
     """Sends a signed thaw transaction to the Bitcoin network.
+
+    Basically wraps bitcoind.sendrawtransaction
     """
 
 @conf.require
-def report():
+def report_scan():
     """Finds all addresses by all known permutations of `ms` and gets
     their balances from Blockchain.info.
     """    
-    irange = xrange(0, get_i())
-    addrs = _report_addresses(irange)
-    balances = conf.binfo.multiaddr(active=addrs)
+    irange = xrange(0, get_i()+1)
+    report = list(_report_addresses(irange))
+    ii, addrs = zip(report)
+    addr_info = conf.binfo.multiaddr(active=addrs)
     
-    print "Total %s addresses:" % len(balances["addresses"])
-    for addr in balances["addresses"]:
-        print u"%s: %s" % (addr["address"], addr["final_balance"])
+    balances = dict((addr["address"], addr["final_balance"])
+                    for addr in addr_info["addresses"])
+
+    print "Total %s addresses:" % len(addrs)
+    for i, addr in report:
+        print u"%s %s %s" % (i, addr, balances[addr])
+
+@conf.require
+def report_log():
+    """Prints out all logged outgone transactions."""
+
+    cursor = conf.db.cursor()
+    row_count = cursor.execute("""
+SELECT i, address, date_created, txid, amount FROM coldman_txlog
+""")
+    print "Total %s transactions:" % row_count
+    for row in cursor.fetchall():
+        print " ".join(row)
 
 actions = {"freeze": freeze, 
-           "report": report, 
+           "report_scan": report_scan,
+           "report_log": report_log,
            "addpub": addpub, 
            "genkey": genkey,
            "init": conf.init}
@@ -171,10 +238,6 @@ def _make_multisig_addr(ms, n):
     ms_i = []
     while not ms_i:
         try:
-            # TODO bitcoind uses a different public key format than
-            # specified in the deterministic key spec.
-            # Looks like bitcoind uses hex encoded openssl CECKeys as is
-            # -> DER
             ms_i = [hexlify(public_pair_to_sec(m.subkey(i).public_pair))
                     for m in ms]
         except pycoin.wallet.InvalidKeyGeneratedError:
