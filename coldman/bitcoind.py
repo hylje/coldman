@@ -99,8 +99,15 @@ class BitcoindConnection(object):
         return self._call("getnewaddress")
 
     def createrawtransaction(self, inputs, outputs):
-        # TODO do some validation
+        # TODO do some validation: inputs is a list of dicts, outputs
+        # is a dict
         return self._call("createrawtransaction", inputs, outputs)
+
+    def getrawtransaction(self, txid):
+        return self._call("getrawtransaction", txid)
+
+    def decoderawtransaction(self, rawtx):
+        return self._call("decoderawtransaction", rawtx)
         
     def _is_valid_pubkey(self, k):
         try:

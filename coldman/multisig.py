@@ -2,6 +2,7 @@
 
 import sys
 from binascii import hexlify
+import json
 
 import pycoin.wallet
 from pycoin.encoding import public_pair_to_sec
@@ -140,6 +141,12 @@ def thaw(i, output_addr=None):
     Also see:
     https://gist.github.com/gavinandresen/3966071
     """
+    try:
+        i = int(i)
+    except ValueError:
+        print "Invalid index. Please supply an integer."
+        sys.exit(12)
+
     if output_addr is None:
         output_addr = conf.bitcoind.getnewaddress()
 
@@ -153,9 +160,27 @@ SELECT txid, amount FROM coldman_txlog WHERE i=?
     
     txid, amount = cursor.fetchone()
     
-    # the txn could require redeemScript and scriptPubKey if the
-    # original txid is not in the network
-    # but usually not
+    # the txn could require redeemScript and scriptPubKey to be
+    # supplied if the original txid is not in the network 
+
+    # but usually not, we can query the blockchain for the tx info
+    # based on txid only
+
+    txinfo_raw = conf.bitcoind.getrawtransaction(txid)
+    txinfo = conf.bitcoind.decoderawtransaction(txinfo_raw)
+    addrinfo = _get_multisig_addr(_get_wallets(), get_n(), i)
+
+    redeemScript = addrinfo["redeemScript"]
+    scriptPubKey = None
+    vout = None
+    for output in txinfo["vout"]:
+        if addrinfo["address"] in output["scriptPubKey"]["addresses"]:
+            scriptPubKey = output["scriptPubKey"]["hex"]
+            vout = output["n"]
+            break
+    else:
+        print "Invalid transaction in log.."
+        sys.exit(11)
 
     fee = 0.0001
 
@@ -164,11 +189,9 @@ SELECT txid, amount FROM coldman_txlog WHERE i=?
     else:
         amount_with_fee = amount - fee
     
-    # TODO enumerate the inputs here so that electrum can read the
-    # transaction
     txn = conf.bitcoind.createrawtransaction(
         [{"txid": txid,
-          "vout": 0,
+          "vout": vout, 
           }],
         {output_addr: max(0, amount_with_fee)})
 
@@ -176,12 +199,13 @@ SELECT txid, amount FROM coldman_txlog WHERE i=?
         {"complete": False,
          "hex": txn,
          "input_info": [
-                {"scriptPubKey": None, # XXX
+                {"redeemScript": redeemScript,
+                 "scriptPubKey": scriptPubKey,
                  "electrumKeyID": (i, False),
+                 "address": addrinfo["address"],
                  "vout": 0,
                  "txid": txid},
-                ]},
-        indent=4)
+                ]})
 
 @conf.require
 def report():
@@ -232,12 +256,27 @@ WHERE spent=0
     for row in cursor.fetchall():
         print "{} {} {} {:.8f}".format(*row)
 
+@conf.require
+def bitcoind(command, *args):
+    "Debug tool to access the datafile bitcoind"
+    import pprint
+
+    parsed_args = []
+    for a in args:
+        if a.startswith("[") or a.startswith("{"):
+            parsed_args.append(json.loads(a))
+        else:
+            parsed_args.append(a)
+
+    return pprint.pprint(getattr(conf.bitcoind._bitcoind, command)(*parsed_args))
+
 actions = {"freeze": freeze, 
            "thaw": thaw,
            "report": report,
            "addpub": addpub, 
            "genkey": genkey,
-           "init": conf.init}
+           "init": conf.init,
+           "bitcoind": bitcoind}
 
 @conf.require
 def _report_addresses(irange):
