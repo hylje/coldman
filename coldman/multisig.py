@@ -164,13 +164,24 @@ SELECT txid, amount FROM coldman_txlog WHERE i=?
     else:
         amount_with_fee = amount - fee
     
+    # TODO enumerate the inputs here so that electrum can read the
+    # transaction
     txn = conf.bitcoind.createrawtransaction(
         [{"txid": txid,
           "vout": 0,
           }],
         {output_addr: max(0, amount_with_fee)})
 
-    print txn
+    print json.dumps(
+        {"complete": False,
+         "hex": txn,
+         "input_info": [
+                {"scriptPubKey": None, # XXX
+                 "electrumKeyID": (i, False),
+                 "vout": 0,
+                 "txid": txid},
+                ]},
+        indent=4)
 
 @conf.require
 def report():
