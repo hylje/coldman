@@ -201,7 +201,7 @@ SELECT txid, amount FROM coldman_txlog WHERE i=?
          "input_info": [
                 {"redeemScript": redeemScript,
                  "scriptPubKey": scriptPubKey,
-                 "electrumKeyID": (i, False),
+                 "coldmanDerivationIndex": i, 
                  "address": addrinfo["address"],
                  "vout": 0,
                  "txid": txid},
@@ -270,13 +270,18 @@ def bitcoind(command, *args):
 
     return pprint.pprint(getattr(conf.bitcoind._bitcoind, command)(*parsed_args))
 
+def derive(key, i):
+    w = pycoin.wallet.Wallet.from_wallet_key(key)
+    print w.subkey(i).wif()
+
 actions = {"freeze": freeze, 
            "thaw": thaw,
            "report": report,
            "addpub": addpub, 
            "genkey": genkey,
            "init": conf.init,
-           "bitcoind": bitcoind}
+           "bitcoind": bitcoind,
+           "derive": derive}
 
 @conf.require
 def _report_addresses(irange):
@@ -324,7 +329,7 @@ def _get_wallets():
     cursor = conf.db.cursor()
     cursor.execute("SELECT key FROM coldman_pubkeys")
     wallet_keys = cursor.fetchall()
-    return [pycoin.wallet.Wallet.from_wallet_key(key) 
+    return [pycoin.wallet.Wallet.from_wallet_key(key).subkey(0) 
             for key, in wallet_keys]
 
 @conf.require
